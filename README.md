@@ -1,66 +1,93 @@
-# Transformer–Convolution Synergistic Architecture for Psychological Distress Detection in Social Text
+# 🧠 Psychological Distress Detection — Mini Project
 
-## 📌 Project Overview
+A hybrid deep learning system for detecting suicidal ideation and psychological distress in social media text, combining **BERT**, **CNN**, and a **Self-Attention** mechanism.
 
-This project focuses on detecting suicidal ideation in social media text using a hybrid deep learning architecture that combines **BERT (Bidirectional Encoder Representations from Transformers)** and **CNN (Convolutional Neural Network)**.
+---
 
-Social media platforms allow people to express their emotions, thoughts, and mental health struggles. Identifying potentially concerning language in these posts can support early awareness and timely intervention.
+## 📁 Project Structure
 
-The proposed system uses BERT to understand the contextual meaning and semantic relationships in text, while CNN extracts important features from the generated contextual embeddings. Finally, the model classifies the input text into two categories: **Suicidal** and **Non-Suicidal**.
+```
+mini pro/
+├── data/
+│   ├── Suicide_Detection.csv               ← Reddit SuicideWatch + depression
+│   ├── Suicide_Ideation_Dataset(Twitter-based).csv
+│   └── human_n_llm_labeled_rSuicidewatch_posts.csv
+├── src/
+│   ├── data_loader.py    ← Text cleaning & dataset loading
+│   ├── model.py          ← BERT-CNN-Attention architecture
+│   ├── train.py          ← 5-fold CV training with early stopping
+│   └── app.py            ← Streamlit web interface
+├── best_model.pth        ← Saved weights (generated after training)
+├── requirements.txt
+└── README.md
+```
 
-## 🎯 Project Objectives
+---
 
-- Develop a hybrid deep learning model using BERT and CNN.
-- Analyse social media text to identify suicidal ideation.
-- Improve contextual understanding of complex language patterns.
-- Extract meaningful text features using CNN.
-- Classify text into suicidal and non-suicidal categories.
-- Support early identification and mental health awareness.
+## 🏗️ Architecture
 
-## ⚙️ Key Features
+```
+Input Text
+    │
+    ▼
+[Text Cleaning] → lowercase, remove URLs/mentions/special chars
+    │
+    ▼
+[BERT Tokenizer] → input_ids, attention_mask
+    │
+    ▼
+[BERT Transformer] → contextual sequence embeddings (768-dim)
+    │
+    ▼
+[1D-CNN Layer] → local n-gram feature extraction (filters: 2,3,4)
+    │
+    ▼
+[Self-Attention] → captures hidden distress cues
+    │
+    ▼
+[FC Classifier] → Binary output: Normal / Distressed
+```
 
-- **Text Preprocessing:** Removes noise, special characters, stop words, and irrelevant content.
-- **Text Normalization:** Converts text into lowercase for consistency.
-- **Tokenization:** Converts processed text into meaningful tokens or subwords.
-- **BERT Integration:** Generates contextual embeddings and captures semantic relationships.
-- **CNN Feature Extraction:** Applies convolutional filters and pooling operations to extract important patterns.
-- **Text Classification:** Classifies input text as suicidal or non-suicidal.
-- **Hybrid Architecture:** Combines Transformer-based contextual understanding with CNN-based feature extraction.
+---
 
-## 🧠 Model Architecture and Workflow
+## ⚙️ Setup & Installation
 
-1. **Data Collection:** Collects social media text data for analysis.
-2. **Data Preprocessing:** Cleans text by removing noise, special characters, stop words, and duplicate or irrelevant entries.
-3. **Tokenization:** Converts cleaned text into tokens using the BERT tokenizer.
-4. **BERT Model:** Generates contextual embeddings to understand the meaning and relationships between words.
-5. **CNN Model:** Processes BERT embeddings using convolutional filters and pooling operations to extract important features.
-6. **Classification:** Passes extracted features through fully connected layers.
-7. **Output Generation:** Predicts whether the input text belongs to the suicidal or non-suicidal category.
+```powershell
+pip install -r requirements.txt
+```
 
-## 🛠️ Technologies and Concepts
+---
 
-- **Artificial Intelligence:** Deep Learning
-- **Natural Language Processing (NLP)**
-- **Transformer Architecture:** BERT
-- **Deep Learning Architecture:** CNN
-- **Text Processing:** Tokenization and Text Preprocessing
-- **Feature Extraction:** Contextual Embeddings
-- **Classification:** Binary Text Classification
+## 🚀 Running the Project
 
-## 📊 Expected Benefits
+### Step 1: Train the Model
+```powershell
+python src/train.py
+```
+This will:
+- Load and clean `data/Suicide_Detection.csv`
+- Run 5-Fold Cross-Validation with Early Stopping
+- Save the best weights as `best_model.pth`
 
-- Better contextual understanding of social media text.
-- Improved feature extraction through CNN.
-- Identification of potentially concerning text patterns.
-- Support for early awareness and intervention.
-- A hybrid approach combining Transformer and CNN architectures.
+### Step 2: Launch the Web App
+```powershell
+streamlit run src/app.py
+```
+Open your browser at `http://localhost:8501` to use the live demo.
 
-## ⚠️ Important Disclaimer
+---
 
-This project is an academic prototype for text classification and research. Its predictions should not be treated as a clinical diagnosis or a reliable assessment of an individual's mental health or suicide risk. Any real-world use would require careful validation, privacy safeguards, and appropriate human oversight.
+## 📊 Results
 
-## 🎓 Project Type
+| Model | Accuracy | F1-Score |
+|---|---|---|
+| **Proposed (BERT-CNN-Attention)** | **99.14%** | **99.08%** |
+| Basyouni et al. | 98.92% | — |
+| Rabani et al. | 96.33% | — |
 
-Academic Project – Bachelor of Technology (B.Tech), Computer Science and Engineering.
+---
 
-**This project demonstrates the application of Natural Language Processing, Transformer models, and Convolutional Neural Networks for psychological distress detection in social media text.**
+## 📌 Notes
+- Training on CPU takes ~2–3 hours for 2,000 samples (5 folds).
+- To train on the full 231,980 row dataset, remove the `.sample(2000)` line in `train.py`.
+- This tool is for **academic research only** and is not a substitute for professional mental health assessment.

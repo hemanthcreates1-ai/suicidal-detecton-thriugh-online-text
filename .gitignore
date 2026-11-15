@@ -1,0 +1,31 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+
+# Model Weights & Checkpoints (>100MB - exceeds GitHub upload limits)
+*.pth
+*.pt
+*.bin
+*.safetensors
+best_model.pth
+
+# Large Datasets (>100MB - exceeds GitHub upload limits)
+data/Suicide_Detection.csv
+
+# Python / IDE / OS Files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+
+# Streamlit run cache
+.streamlit/
