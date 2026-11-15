@@ -1,6 +1,6 @@
 # Implementation Details
 
-The project is structured modularly for clarity, reproducibility, and easy deployment.
+The project is structured into data loading, model, training, evaluation, and UI modules. See the root README for setup instructions and current limitations.
 
 ## 📂 Source Code Structure
 
@@ -8,9 +8,9 @@ The project is structured modularly for clarity, reproducibility, and easy deplo
 | :--- | :--- | :--- |
 | **Model** | `src/model.py` | Implementation of `BertCNNAttention` and the custom `SelfAttention` class. |
 | **Data Loader** | `src/data_loader.py` | Regex-based cleaning, NLTK stopword handling, and label mapping. |
-| **Training** | `src/train.py` | Training loop with AdamW optimizer, model checkpointing (`best_model.pth`), and early stopping. |
+| **Training** | `src/train.py` | Training loop with AdamW optimizer, one stratified validation split, model checkpointing (`best_model.pth`), and early stopping. |
 | **UI** | `src/app.py` | Streamlit-based web dashboard with glassmorphism UI and real-time inference. |
-| **Eval** | `src/evaluate.py` | Logic for computing precision, recall, and confusion matrix. |
+| **Eval** | `src/evaluate.py` | Computes metrics on a separately supplied CSV test set. |
 
 ## 🛠 Key Implementation Details
 
@@ -18,7 +18,7 @@ The project is structured modularly for clarity, reproducibility, and easy deplo
 The model is implemented using PyTorch's `nn.Module`. We specifically pad CNN outputs so they can be concatenated regardless of kernel size, ensuring that the self-attention layer always receives a consistent feature map.
 
 ### Data Efficiency
-Because training on the full 230k dataset on CPU is time-intensive, the `train.py` script implements **Stratified Proportional Sampling**, allowing for high accuracy (~99%+) even when training on smaller subsets for academic demonstration.
+Training samples at most 4,000 rows and uses a single stratified 80/20 training/validation split. Validation performance is not an independent test result. No benchmark score is claimed without a separately held-out test run.
 
-### Production UI
-The `app.py` utility uses **resource caching** (`st.cache_resource`) to load the heavy BERT model and weights only once. The UI communicates predictions via a "Distress Likelihood Scale" with dynamic color-coding.
+### UI
+The `app.py` utility uses Streamlit resource caching to load the BERT model once. Prediction is disabled when a trained checkpoint is absent. The interface is a research demo, not a clinical assessment.

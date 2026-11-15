@@ -1,11 +1,15 @@
 import os
 import re
+from pathlib import Path
 import pandas as pd
 import nltk
 from nltk.corpus import stopwords
 
-nltk.download('stopwords', quiet=True)
-stop_words = set(stopwords.words('english'))
+try:
+    stop_words = set(stopwords.words('english'))
+except LookupError:
+    nltk.download('stopwords', quiet=True)
+    stop_words = set(stopwords.words('english'))
 
 
 def clean_text(text):
@@ -67,8 +71,9 @@ def _standardize_frame(frame, source_name):
         frame['label'] = frame['Suicide'].map(_normalize_label)
     elif 'severity' in frame.columns:
         frame['label'] = frame['severity'].map(_normalize_label)
-    elif 'gpt_label' in frame.columns and 'claude_label' in frame.columns:
-        frame['label'] = frame[['gpt_label', 'claude_label', 'gemini_label', 'llama_label', 'mistral_label']].mean(axis=1).map(lambda x: 1 if x >= 3 else 0)
+    elif {'gpt_label', 'claude_label', 'gemini_label', 'llama_label', 'mistral_label'}.issubset(frame.columns):
+        ratings = frame[['gpt_label', 'claude_label', 'gemini_label', 'llama_label', 'mistral_label']].apply(pd.to_numeric, errors='coerce')
+        frame['label'] = ratings.mean(axis=1).map(lambda x: 1 if x >= 3 else (0 if x <= 2 else None))
     else:
         raise ValueError(f"Dataset source '{source_name}' does not include a supported label column.")
 
@@ -79,8 +84,12 @@ def _standardize_frame(frame, source_name):
 
 
 def load_and_preprocess_data(dataset_path=None, data_dir='data'):
-    """Load the strongest available mental-health dataset and fall back to the older project sources."""
-    external_dataset_dir = os.environ.get('EXTERNAL_DATASET_DIR', os.path.join(os.path.dirname(__file__), '..', 'data'))
+    """Load supported project CSVs from data_dir and optional EXTERNAL_DATASET_DIR."""
+    project_root = Path(__file__).resolve().parent.parent
+    data_path = Path(data_dir)
+    if not data_path.is_absolute():
+        data_path = project_root / data_path
+    external_dataset_dir = Path(os.environ.get('EXTERNAL_DATASET_DIR', data_path))
 
     def map_status_to_label(value):
         if pd.isna(value):
@@ -106,21 +115,24 @@ def load_and_preprocess_data(dataset_path=None, data_dir='data'):
         return frame
 
     if dataset_path is not None:
-        df = pd.read_csv(dataset_path)
-        if 'status' in df.columns or 'class' in df.columns or 'Suicide' in df.columns:
-            return standardize_mental_health_frame(df, os.path.basename(dataset_path))
-        return _standardize_frame(df, os.path.basename(dataset_path))
+        file_path = Path(dataset_path)
+        if not file_path.is_absolute():
+            file_path = project_root / file_path
+        df = pd.read_csv(file_path)
+        if 'status' in df.columns:
+            return standardize_mental_health_frame(df, file_path.name)
+        return _standardize_frame(df, file_path.name)
 
     if data_dir is None:
         data_dir = 'data'
 
     dataset_files = []
-    for candidate_dir in [data_dir, external_dataset_dir]:
-        if not os.path.exists(candidate_dir):
+    for candidate_dir in [data_path, external_dataset_dir]:
+        if not candidate_dir.exists():
             continue
-        for name in sorted(os.listdir(candidate_dir)):
-            if name.lower().endswith('.csv') and 'mental' in name.lower():
-                dataset_files.append(os.path.join(candidate_dir, name))
+        for file_path in sorted(candidate_dir.glob('*.csv')):
+            if file_path not in dataset_files:
+                dataset_files.append(file_path)
 
     if dataset_files:
         valid_frames = []
@@ -128,9 +140,9 @@ def load_and_preprocess_data(dataset_path=None, data_dir='data'):
             try:
                 frame = pd.read_csv(file_path)
                 if 'status' in frame.columns or 'class' in frame.columns or 'Suicide' in frame.columns:
-                    valid_frames.append(standardize_mental_health_frame(frame, os.path.basename(file_path)))
+                    valid_frames.append(standardize_mental_health_frame(frame, file_path.name))
                 else:
-                    valid_frames.append(_standardize_frame(frame, os.path.basename(file_path)))
+                    valid_frames.append(_standardize_frame(frame, file_path.name))
             except Exception:
                 continue
 
@@ -139,21 +151,27 @@ def load_and_preprocess_data(dataset_path=None, data_dir='data'):
             combined = combined.drop_duplicates(subset=['text', 'label']).reset_index(drop=True)
             return combined
 
-    project_files = [
-        os.path.join(data_dir, 'Suicide_Detection.csv'),
-        os.path.join(data_dir, 'Suicide_Ideation_Dataset(Twitter-based).csv'),
-        os.path.join(data_dir, 'human_n_llm_labeled_rSuicidewatch_posts.csv'),
-    ]
+    project_files = [data_path / name for name in (
+        'Suicide_Detection.csv',
+        'Suicide_Ideation_Dataset(Twitter-based).csv',
+        'human_n_llm_labeled_rSuicidewatch_posts.csv',
+    )]
 
     valid_frames = []
     for file_path in project_files:
-        if not os.path.exists(file_path):
+        if not file_path.exists():
             continue
         frame = pd.read_csv(file_path)
-        valid_frames.append(_standardize_frame(frame, os.path.basename(file_path)))
+        if 'status' in frame.columns:
+            valid_frames.append(standardize_mental_health_frame(frame, file_path.name))
+        else:
+            valid_frames.append(_standardize_frame(frame, file_path.name))
 
     if not valid_frames:
-        raise FileNotFoundError(f"No supported dataset files were found under '{data_dir}' or '{external_dataset_dir}'.")
+        raise FileNotFoundError(
+            f"No supported CSV datasets were found under '{data_path}' or '{external_dataset_dir}'. "
+            "Add a CSV with supported text and label columns, or set EXTERNAL_DATASET_DIR."
+        )
 
     combined = pd.concat(valid_frames, ignore_index=True)
     combined = combined.drop_duplicates(subset=['text', 'label']).reset_index(drop=True)

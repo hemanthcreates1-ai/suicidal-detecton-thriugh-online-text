@@ -1,5 +1,4 @@
 import os
-import subprocess
 import sys
 
 import matplotlib.pyplot as plt
@@ -12,7 +11,7 @@ from transformers import AutoTokenizer
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from data_loader import clean_text, load_and_preprocess_data, load_dataset_summary
+from data_loader import clean_text, load_dataset_summary
 from model import BertCNNAttention
 
 st.set_page_config(
@@ -103,68 +102,17 @@ def load_model_and_tokenizer():
     tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
     model = BertCNNAttention()
     model_path = os.path.join(os.path.dirname(__file__), '..', 'best_model.pth')
-    loaded = False
-    try:
+    loaded = os.path.isfile(model_path)
+    if loaded:
         model.load_state_dict(torch.load(model_path, map_location='cpu'))
-        loaded = True
-    except FileNotFoundError:
-        pass
     model.eval()
     return model, tokenizer, loaded
 
 
 @st.cache_data
 def compute_quick_eval(model_name='bert-base-uncased', sample_size=300):
-    df = load_and_preprocess_data(data_dir='data').sample(min(len(load_and_preprocess_data(data_dir='data')), sample_size), random_state=42)
-    if len(df) < 10:
-        return None
-
-    model, tokenizer, _ = load_model_and_tokenizer()
-    texts = df['cleaned_text'].tolist()
-    labels = df['label'].astype(int).tolist()
-
-    preds = []
-    true = []
-    distress_scores = []
-
-    for i in range(0, len(texts), 16):
-        batch_texts = texts[i:i + 16]
-        batch_labels = labels[i:i + 16]
-        enc = tokenizer(
-            batch_texts,
-            max_length=128,
-            add_special_tokens=True,
-            padding='max_length',
-            truncation=True,
-            return_attention_mask=True,
-            return_tensors='pt',
-        )
-        with torch.no_grad():
-            logits = model(enc['input_ids'], enc['attention_mask'])
-            probs = torch.softmax(logits, dim=1)
-            batch_preds = torch.argmax(logits, dim=1).cpu().numpy()
-            distress_scores.extend(probs[:, 1].cpu().numpy().tolist())
-        preds.extend(batch_preds.tolist())
-        true.extend(batch_labels)
-
-    metrics = {
-        'Accuracy': float(accuracy_score(true, preds) * 100),
-        'F1-score': float(f1_score(true, preds, average='weighted') * 100),
-        'Precision': float(precision_score(true, preds, average='weighted', zero_division=0) * 100),
-        'Recall': float(recall_score(true, preds, average='weighted', zero_division=0) * 100),
-    }
-    cm = confusion_matrix(true, preds, labels=[0, 1])
-    normal_conf = float(np.mean([score for score, label in zip(distress_scores, true) if label == 0])) if true else 0.0
-    distress_conf = float(np.mean([score for score, label in zip(distress_scores, true) if label == 1])) if true else 0.0
-
-    return {
-        'metrics': metrics,
-        'cm': cm,
-        'confidence_by_level': pd.DataFrame({
-            'Risk level': ['Normal', 'Distress'],
-            'Average confidence': [normal_conf, distress_conf],
-        }),
-    }
+    # Kept as a placeholder for a future independent-test-set evaluation.
+    return None
 
 
 model, tokenizer, model_loaded = load_model_and_tokenizer()
@@ -175,16 +123,21 @@ with st.sidebar:
     if model_loaded:
         st.success('✅ Trained model loaded')
     else:
-        st.warning('⚠️ Model not trained yet')
+        st.warning('⚠️ No trained checkpoint found; predictions are disabled.')
 
     threshold = st.slider('Alert threshold', min_value=0.35, max_value=0.85, value=0.5, step=0.01)
     st.markdown('---')
 
-    dataset_info = load_dataset_summary(data_dir='data')
-    st.subheader('Dataset coverage')
-    st.metric('Rows', dataset_info['rows'])
-    st.metric('Distress rate', f"{dataset_info['positive_rate'] * 100:.1f}%")
-    st.caption('Sources: mental_heath_unbanlanced.csv + mental_health_combined_test.csv + the feature-engineered mental-health corpus; binary stress mapping retains Normal vs distress output.')
+    try:
+        dataset_info = load_dataset_summary(data_dir='data')
+    except (FileNotFoundError, ValueError) as exc:
+        dataset_info = None
+        st.info(f'Dataset summary unavailable: {exc}')
+    if dataset_info:
+        st.subheader('Dataset coverage')
+        st.metric('Rows', dataset_info['rows'])
+        st.metric('Distress rate', f"{dataset_info['positive_rate'] * 100:.1f}%")
+        st.caption('Label prevalence in the available project CSV files; labels are not clinical ground truth.')
 
 example_prompts = [
     'I cannot do this anymore, I feel like everyone would be better without me.',
@@ -229,7 +182,9 @@ with col_b:
     run_btn = st.button('🔍 Analyze message', use_container_width=True, type='primary')
 
 if run_btn:
-    if not user_input.strip():
+    if not model_loaded:
+        st.error('A trained best_model.pth checkpoint is required. See the README training instructions.')
+    elif not user_input.strip():
         st.error('Please enter a message before running the model.')
     else:
         with st.spinner('Running the distress model...'):
@@ -269,65 +224,8 @@ if run_btn:
         col2.metric('Normal confidence', f'{normal_prob * 100:.1f}%')
         st.progress(min(max(distress_prob, 0.0), 1.0), text=f'Distress likelihood ({distress_prob * 100:.1f}%)')
 
-with st.expander('📊 Model benchmark and training data'):
-    st.markdown(
-        """
-        <div class='dataset-box'>
-            <strong>Current source dataset:</strong><br>
-            • mental_heath_unbanlanced.csv (main 4-class mental-health corpus)<br>
-            • mental_health_combined_test.csv (balanced 4-class validation set)<br>
-            • mental_health_feature_engineered.csv (feature-rich text subset)
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.table(
-        {
-            'Model': ['Proposed (BERT + CNN + Attention)', 'Basyouni et al.', 'Rabani et al.'],
-            'Accuracy': ['99.14%', '98.92%', '96.33%'],
-            'F1-score': ['99.08%', '—', '—'],
-        }
-    )
-
-    if model_loaded:
-        eval_report = compute_quick_eval()
-        if eval_report:
-            metrics_df = pd.DataFrame({'Metric': list(eval_report['metrics'].keys()), 'Value': list(eval_report['metrics'].values())})
-            st.subheader('Model metrics snapshot')
-            st.bar_chart(metrics_df.set_index('Metric'))
-
-            fig, ax = plt.subplots(figsize=(5, 4))
-            ax.imshow(eval_report['cm'], cmap='Blues')
-            ax.set_xticks([0, 1])
-            ax.set_yticks([0, 1])
-            ax.set_xticklabels(['Normal', 'Distress'])
-            ax.set_yticklabels(['Normal', 'Distress'])
-            ax.set_xlabel('Predicted')
-            ax.set_ylabel('Actual')
-            for i in range(2):
-                for j in range(2):
-                    ax.text(j, i, str(eval_report['cm'][i, j]), ha='center', va='center', color='black', fontsize=12)
-            ax.set_title('Confusion matrix')
-            st.pyplot(fig)
-
-            st.subheader('Confidence by risk level')
-            st.bar_chart(eval_report['confidence_by_level'].set_index('Risk level'))
-
-st.sidebar.markdown('---')
-train_button = st.sidebar.button('🚀 Retrain model', use_container_width=True)
-if train_button:
-    venv_python = os.path.join(os.getcwd(), '.venv', 'Scripts', 'python.exe')
-    if not os.path.exists(venv_python):
-        venv_python = sys.executable
-    with st.sidebar.spinner('Training model... This can take a few minutes.'):
-        result = subprocess.run([venv_python, 'src/train.py'], capture_output=True, text=True, cwd=os.getcwd())
-    if result.returncode == 0:
-        st.sidebar.success('Training finished successfully.')
-        st.sidebar.code(result.stdout[-1200:])
-    else:
-        st.sidebar.error('Training did not complete.')
-        st.sidebar.code(result.stderr[-1200:])
+with st.expander('📊 Model and data notes'):
+    st.write('This research prototype has no independently validated benchmark included. See the README for the training split, dataset setup, and limitations.')
 
 st.markdown('---')
 st.caption('⚠️ This system is intended for research and screening support only, not as a replacement for professional mental health diagnosis.')

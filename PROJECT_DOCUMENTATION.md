@@ -1,87 +1,30 @@
-# Project Documentation: Psychological Distress Detection
+# Project Documentation
 
-This document provides a comprehensive overview of the algorithms, architecture, implementation, and technology stack used in the **BERT-CNN-Attention Hybrid Suicide Detection System**.
+This repository contains a research prototype that classifies social media text into two broad labels using a BERT + CNN + attention architecture. It is not a clinical tool and has not been validated for care decisions.
 
----
+## Architecture
 
-## 1. Tech Stack Overview
+1. `bert-base-uncased` creates token-level contextual representations.
+2. One-dimensional convolutions with kernel widths 2, 3, and 4 produce local features.
+3. A learned attention layer pools those features.
+4. A small fully connected head returns two class logits.
 
-The project is built using modern deep learning frameworks and web technologies to ensure high performance, accuracy, and a premium user experience.
+## Data and labels
 
-- **Programming Language**: Python 3.10+
-- **Deep Learning Framework**: [PyTorch](https://pytorch.org/) (Core neural network implementation)
-- **Transformer Library**: [Hugging Face Transformers](https://huggingface.co/docs/transformers/) (BERT implementation)
-- **Data Manipulation**: [Pandas](https://pandas.pydata.org/), [NumPy](https://numpy.org/)
-- **Natural Language Processing**: [NLTK](https://www.nltk.org/) (Stopword removal and text cleaning)
-- **Evaluation & Metrics**: [Scikit-learn](https://scikit-learn.org/) (F1-Score, Accuracy, Stratified Splitting, Class Weights)
-- **Web Interface**: [Streamlit](https://streamlit.io/) (High-performance web dashboard)
-- **Styling**: Vanilla CSS (implemented via Streamlit's `st.markdown`) for a "Glassmorphism" UI aesthetic.
+`src/data_loader.py` accepts CSV text columns `text`, `Tweet`, `content`, or `cleaned_text` and label columns `label`, `class`, `Suicide`, or `severity`. It cleans text, maps supported binary/category values to 0/1, drops unsupported labels, and removes duplicate text/label pairs after combining files.
 
----
+The checked-in data includes a small Twitter CSV and a Reddit annotation CSV. `Suicide_Detection.csv` and model weights are not included. Check each dataset's provenance, terms, privacy, and license before reusing it.
 
-## 2. Architecture Overview
+## Training and evaluation
 
-The system utilizes a **Hybrid Deep Learning Architecture** that combines the strengths of three powerful neural network components:
+Run `python src/train.py` after installing `requirements.txt`. The script samples at most 4,000 rows, performs one stratified train/validation split, uses early stopping, and writes the best validation checkpoint to `best_model.pth`. This is not 5-fold cross-validation.
 
-1.  **BERT (Bidirectional Encoder Representations from Transformers)**:
-    *   **Role**: Contextual Semantic Extraction.
-    *   **Details**: Uses the `bert-base-uncased` model to process input text and generate high-dimensional hidden states that capture the deep context and meaning of words based on their surroundings.
+Evaluate with a separately held-out CSV: `python src/evaluate.py path/to/independent_test.csv`. Do not report validation metrics as independent test performance. Record dataset versions, preprocessing, split, class-wise metrics, and random seed to make results reproducible.
 
-2.  **1D Convolutional Neural Network (CNN)**:
-    *   **Role**: Local Feature Extraction.
-    *   **Details**: Applies multiple 1D filters (kernel sizes 2, 3, and 4) to the BERT sequence output. This layer captures local patterns like specific phrases, "n-gram" equivalents, and linguistic markers of distress.
+## Running the UI
 
-3.  **Self-Attention Mechanism**:
-    *   **Role**: Feature Prioritization (Hidden Meaning Capture).
-    *   **Details**: A custom global attention layer that weights the importance of different segments of the CNN-processed text. It allows the model to "focus" on the most critical indicators of suicidal ideation within a long post.
+Run `streamlit run src/app.py`. A trained `best_model.pth` is required before the UI will make predictions. The tokenizer and BERT base model are downloaded from Hugging Face on first use. Dataset summaries use available supported CSV files.
 
-4.  **Classification Head**:
-    *   **Structure**: Dropout Layer -> Fully Connected (Linear) Layer -> ReLU Activation -> Output Logits.
-    *   **Function**: Maps the attended feature vector to a binary classification (Suicidal vs. Non-Suicidal).
+## Limitations
 
----
-
-## 3. Algorithms & Methodology
-
-### A. Preprocessing Algorithm
-To ensure the model focuses on semantic content, the data undergoes rigorous cleaning:
-- **Normalization**: Conversion to lowercase.
-- **Noise Removal**: Regex-based removal of URLs, `@mentions`, and hashtags.
-- **Stopword Filtering**: Removal of common English stopwords using NLTK.
-- **Tokenization**: BERT WordPiece Tokenizer with `max_length=128`.
-
-### B. Training Algorithms
-- **Optimizer**: **AdamW** (Adam with Weight Decay).
-- **Loss Function**: **Weighted Cross-Entropy Loss**.
-    - *Rationale*: Handles class imbalance by penalizing minority class misclassifications more heavily.
-- **Learning Rate Schedule**: Constant learning rate of `2e-5`.
-- **Early Stopping**: Monitors validation loss.
-
-### C. Evaluation Strategy
-The model is evaluated using:
-- **Accuracy**: Overall correct predictions.
-- **Weighted F1-Score**: Harmonic mean of precision and recall.
-- **5-Fold Stratified Cross-Validation**: For robustness.
-
----
-
-## 4. Implementation Details
-
-The codebase is modularized for clarity and maintainability:
-
-| File | Purpose |
-| :--- | :--- |
-| `src/model.py` | Implementation of `BertCNNAttention` and `SelfAttention`. |
-| `src/train.py` | Training pipeline with early stopping and stratification. |
-| `src/data_loader.py` | Dataset cleaning logic (Regex, NLTK). |
-| `src/app.py` | UI with real-time inference and CSS aesthetics. |
-| `src/evaluate.py` | Metrics calculation and evaluation. |
-
----
-
-## 5. Performance Benchmarks
-
-The proposed hybrid model achieves high results:
-
-- **Accuracy**: ~99.14%
-- **F1-Score**: ~99.08%
+The broad binary mapping merges distinct mental-health categories and annotations; it does not establish clinical ground truth. Social media text lacks context, and the classifier can make harmful errors. Use only for research or demonstration, not diagnosis, triage, or intervention.

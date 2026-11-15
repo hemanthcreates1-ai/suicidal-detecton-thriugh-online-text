@@ -1,4 +1,5 @@
 import warnings
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -58,7 +59,8 @@ def train_model():
     print(f'Using device: {device}')
 
     print('Loading combined dataset...')
-    df = load_and_preprocess_data(data_dir='data')
+    project_root = Path(__file__).resolve().parent.parent
+    df = load_and_preprocess_data(data_dir=project_root / 'data')
 
     if len(df) > 4000:
         print(f'Dataset has {len(df)} rows. Sampling 4000 rows for faster CPU training...')
@@ -67,6 +69,8 @@ def train_model():
     texts = df['cleaned_text'].astype(str).tolist()
     labels = df['label'].astype(int).tolist()
 
+    if set(labels) != {0, 1}:
+        raise ValueError('Training data must contain examples from both classes (0 and 1).')
     class_weights = compute_class_weight(class_weight='balanced', classes=np.array([0, 1]), y=labels)
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float)
     print(f'Class weights -> Non-distress: {class_weights[0]:.3f} | Distress: {class_weights[1]:.3f}')
@@ -134,7 +138,7 @@ def train_model():
 
         if acc > best_val_acc:
             best_val_acc = acc
-            torch.save(model.state_dict(), 'best_model.pth')
+            torch.save(model.state_dict(), project_root / 'best_model.pth')
             print(f'--> Saved improved model with {acc:.4f} accuracy')
 
         if val_loss < best_val_loss:

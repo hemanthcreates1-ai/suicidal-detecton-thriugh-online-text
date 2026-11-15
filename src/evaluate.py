@@ -1,111 +1,84 @@
-"""
-evaluate.py — Run this AFTER training completes to generate a
-              detailed evaluation report on a held-out test set.
+"""Evaluate a saved checkpoint on a CSV that was kept separate from training.
 
-Usage:
-    python src/evaluate.py
+Usage: python src/evaluate.py path/to/independent_test.csv
 """
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+import argparse
+from pathlib import Path
+import sys
 
-import torch
-import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import torch
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    accuracy_score, f1_score, precision_score,
-    recall_score, confusion_matrix, classification_report
-)
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from data_loader import load_and_preprocess_data
 from model import BertCNNAttention
 from train import TextDataset
 
-# ── Config ────────────────────────────────────────────────────────────────────
-MODEL_PATH  = "best_model.pth"
-DATA_PATH   = "data/Suicide_Detection.csv"
-BATCH_SIZE  = 16
-MAX_LEN     = 128
-TEST_SIZE   = 0.15   # 15 % held-out test split
 
-def evaluate():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
+def evaluate(dataset_path):
+    project_root = Path(__file__).resolve().parent.parent
+    model_path = project_root / 'best_model.pth'
+    if not model_path.exists():
+        raise FileNotFoundError(f'{model_path} not found. Run training first.')
+    if not dataset_path.exists():
+        raise FileNotFoundError(f'Test dataset not found: {dataset_path}')
 
-    # ── Load model ────────────────────────────────────────────────────────────
-    if not os.path.exists(MODEL_PATH):
-        print(f"ERROR: {MODEL_PATH} not found. Run train.py first!")
-        return
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Device: {device}')
 
-    model = BertCNNAttention().to(device)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=device))
-    model.eval()
-    print("Model loaded from", MODEL_PATH)
-
-    # ── Load data (same sample size as training) ──────────────────────────────
-    df = load_and_preprocess_data(DATA_PATH)
-    if len(df) > 2000:
-        df = df.sample(2000, random_state=42)
-
-    _, test_df = train_test_split(df, test_size=TEST_SIZE, random_state=42, stratify=df['label'])
+    df = load_and_preprocess_data(dataset_path=dataset_path)
+    if set(df['label'].astype(int).unique()) != {0, 1}:
+        raise ValueError('The test dataset must contain both classes (0 and 1).')
 
     tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
-    test_ds    = TextDataset(test_df['cleaned_text'].values,
-                             test_df['label'].values,
-                             tokenizer, MAX_LEN)
-    test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE)
+    model = BertCNNAttention().to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
 
-    # ── Inference ─────────────────────────────────────────────────────────────
-    all_preds, all_true = [], []
+    dataset = TextDataset(
+        df['cleaned_text'].tolist(), df['label'].astype(int).tolist(), tokenizer
+    )
+    loader = DataLoader(dataset, batch_size=16)
+
+    predictions, actual = [], []
     with torch.no_grad():
-        for batch in test_loader:
-            ids   = batch['input_ids'].to(device)
-            mask  = batch['attention_mask'].to(device)
-            lbls  = batch['label']
+        for batch in loader:
+            logits = model(batch['input_ids'].to(device), batch['attention_mask'].to(device))
+            predictions.extend(torch.argmax(logits, dim=1).cpu().tolist())
+            actual.extend(batch['label'].tolist())
 
-            logits = model(ids, mask)
-            preds  = torch.argmax(logits, dim=1).cpu().numpy()
+    print(f'Accuracy:  {accuracy_score(actual, predictions):.4f}')
+    print(f'F1 score:  {f1_score(actual, predictions, average="weighted"):.4f}')
+    print(f'Precision: {precision_score(actual, predictions, average="weighted", zero_division=0):.4f}')
+    print(f'Recall:    {recall_score(actual, predictions, average="weighted", zero_division=0):.4f}')
+    print(classification_report(actual, predictions, labels=[0, 1], target_names=['Normal', 'Distress'], zero_division=0))
 
-            all_preds.extend(preds)
-            all_true.extend(lbls.numpy())
-
-    # ── Metrics ───────────────────────────────────────────────────────────────
-    acc  = accuracy_score(all_true, all_preds)
-    f1   = f1_score(all_true, all_preds, average='weighted')
-    prec = precision_score(all_true, all_preds, average='weighted')
-    rec  = recall_score(all_true, all_preds, average='weighted')
-    cm   = confusion_matrix(all_true, all_preds)
-
-    print("\n" + "="*50)
-    print("EVALUATION REPORT")
-    print("="*50)
-    print(f"  Accuracy  : {acc*100:.2f}%")
-    print(f"  F1-Score  : {f1*100:.2f}%")
-    print(f"  Precision : {prec*100:.2f}%")
-    print(f"  Recall    : {rec*100:.2f}%")
-    print("\nClassification Report:")
-    print(classification_report(all_true, all_preds,
-                                target_names=["Non-Suicidal", "Suicidal"]))
-    print("Confusion Matrix:")
-    print(cm)
-
-    # ── Plot confusion matrix ─────────────────────────────────────────────────
+    matrix = confusion_matrix(actual, predictions, labels=[0, 1])
     fig, ax = plt.subplots(figsize=(6, 5))
-    sns.heatmap(cm, annot=True, fmt='d', cmap='Purples',
-                xticklabels=["Non-Suicidal", "Suicidal"],
-                yticklabels=["Non-Suicidal", "Suicidal"],
-                ax=ax)
-    ax.set_xlabel("Predicted")
-    ax.set_ylabel("Actual")
-    ax.set_title("Confusion Matrix — BERT-CNN-Attention")
-    plt.tight_layout()
-    out_path = "confusion_matrix.png"
-    plt.savefig(out_path, dpi=150)
-    print(f"\nConfusion matrix saved → {out_path}")
+    sns.heatmap(matrix, annot=True, fmt='d', cmap='Purples',
+                xticklabels=['Normal', 'Distress'], yticklabels=['Normal', 'Distress'], ax=ax)
+    ax.set_xlabel('Predicted')
+    ax.set_ylabel('Actual')
+    ax.set_title('BERT-CNN-Attention confusion matrix')
+    fig.tight_layout()
+    output_path = project_root / 'confusion_matrix.png'
+    fig.savefig(output_path, dpi=150)
+    print(f'Confusion matrix saved to {output_path}')
 
-if __name__ == "__main__":
-    evaluate()
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('dataset', type=Path, help='Independent test CSV with supported text and label columns')
+    args = parser.parse_args()
+    evaluate(args.dataset.resolve())
